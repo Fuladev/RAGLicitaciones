@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RAG Licitaciones (beta)</title>
+  <link rel="stylesheet" href="assets/styles.css">
+  <script src="assets/vendor/supabase.js"></script>
+  <script src="assets/vendor/mammoth.browser.min.js"></script>
+  <script src="assets/vendor/marked.min.js"></script>
+  <script src="assets/vendor/purify.min.js"></script>
+  <script src="assets/vendor/xlsx.full.min.js"></script>
+</head>
+<body>
+  <!-- Inicio de sesión -->
+  <section id="vista-login" class="login" hidden>
+    <div class="tarjeta">
+      <h1>📑 RAG Licitaciones</h1>
+      <p class="sutil">Versión beta · inicia sesión con tu cuenta</p>
+      <form id="form-login">
+        <label>Correo<input type="email" id="login-email" required autocomplete="username"></label>
+        <label>Contraseña<input type="password" id="login-clave" required autocomplete="current-password"></label>
+        <button type="submit" class="primario">Entrar</button>
+        <p id="login-error" class="error" hidden></p>
+      </form>
+    </div>
+  </section>
+
+  <!-- Aplicación -->
+  <div id="vista-app" class="app" hidden>
+    <aside class="lateral">
+      <h2>📑 RAG Licitaciones</h2>
+      <p class="sutil">Versión beta</p>
+      <h3>Configuración</h3>
+      <label>Nombre de tu empresa<input id="cfg-empresa" placeholder="Ej.: Omega Agencia de Seguros"></label>
+      <label>Tipo de oferente
+        <select id="cfg-tipo"><option>Agencia de seguros</option><option>Corredor de seguros</option><option>Otro oferente</option></select>
+      </label>
+      <details>
+        <summary>Opciones avanzadas</summary>
+        <label>Profundidad del análisis
+          <select id="cfg-esfuerzo">
+            <option value="low">Rápida</option><option value="medium" selected>Normal</option><option value="high">Profunda (puede tardar más)</option>
+          </select>
+        </label>
+        <label>Fragmentos de referencia por análisis <input id="cfg-frag" type="number" min="10" max="120" value="50"></label>
+      </details>
+      <hr>
+      <div class="metrica"><span>Cobertura de la base documental</span><strong id="cobertura">0 %</strong></div>
+      <div id="siguiente" class="aviso info"></div>
+      <hr>
+      <p class="sutil" id="usuario"></p>
+      <button id="btn-salir" class="secundario">Cerrar sesión</button>
+    </aside>
+
+    <main>
+      <nav class="pestanas">
+        <button data-tab="analizar" class="activa">🔍 Analizar licitación</button>
+        <button data-tab="base">📚 Base documental</button>
+        <button data-tab="guia">🧭 Guía de carga</button>
+        <button data-tab="consultar">💬 Consultar la base</button>
+        <button data-tab="historial">🗂️ Historial</button>
+      </nav>
+
+      <section id="tab-analizar" class="tab">
+        <h1>Analizar una licitación</h1>
+        <div id="aviso-base-vacia" class="aviso alerta" hidden>La base documental está vacía: el análisis no tendrá respaldo. Carga documentos primero.</div>
+        <label>Pliego de condiciones (y anexos en un solo archivo)
+          <input type="file" id="pliego" accept=".pdf,.docx,.xlsx,.txt,.md"></label>
+        <label>Indicaciones adicionales (opcional)
+          <textarea id="notas" rows="3" placeholder="Ej.: enfócate en el equipo de trabajo; la fecha límite de observaciones es el 20 de noviembre."></textarea></label>
+        <button id="btn-analizar" class="primario" disabled>Analizar</button>
+        <p id="estado-analisis" class="sutil"></p>
+        <details id="refs-analisis" hidden><summary>Ver fragmentos de referencia usados</summary><div class="refs"></div></details>
+        <article id="resultado" class="markdown"></article>
+        <div id="descargas" class="fila" hidden>
+          <button id="btn-word" class="secundario">Descargar en Word</button>
+          <button id="btn-md" class="secundario">Descargar en Markdown</button>
+          <span class="sutil">Las observaciones deben revisarse por el área jurídica antes de radicarlas.</span>
+        </div>
+      </section>
+
+      <section id="tab-base" class="tab" hidden>
+        <h1>Documentos de referencia</h1>
+        <p>Carga aquí los documentos que el sistema usará como respaldo. Se indexan para búsqueda; no se entrena ningún modelo. Formatos: PDF, Word (.docx), Excel (.xlsx), texto.</p>
+        <div class="columnas">
+          <div>
+            <label>Categoría<select id="base-categoria"></select></label>
+            <p id="base-descripcion" class="sutil"></p>
+          </div>
+          <div>
+            <label>Archivos<input type="file" id="base-archivos" multiple accept=".pdf,.docx,.xlsx,.txt,.md"></label>
+            <button id="btn-indexar" class="primario" disabled>Indexar archivos</button>
+            <div id="base-progreso"></div>
+          </div>
+        </div>
+        <h2>Documentos cargados</h2>
+        <div id="lista-docs"></div>
+      </section>
+
+      <section id="tab-guia" class="tab" hidden>
+        <h1>Guía: qué información cargar</h1>
+        <p>Mientras más completa la base, mejores observaciones. Carga primero lo de prioridad <strong>Alta</strong>.</p>
+        <table class="tabla"><thead><tr><th>Estado</th><th>Categoría</th><th>Prioridad</th><th>Cargados</th><th>Recomendado</th></tr></thead><tbody id="guia-tabla"></tbody></table>
+        <div id="guia-detalle"></div>
+        <h2>Recomendaciones de los últimos análisis</h2>
+        <div id="guia-analisis" class="sutil">Cuando analices una licitación, aquí aparecerá lo que faltó en la base para ese análisis.</div>
+        <h2>Buenas prácticas</h2>
+        <ul>
+          <li>Usa PDF con texto seleccionable; los escaneados deben pasar antes por OCR.</li>
+          <li>Nombra los archivos con entidad, proceso y año (ej. <code>Alcaldia_Jamundi_CM-003-2025_observaciones.pdf</code>).</li>
+          <li>Actualiza el RUP y los estados financieros cada vez que se renueven: las alertas dependen de ellos.</li>
+          <li>Carga las respuestas de las entidades junto con tus observaciones: así el sistema sabe qué argumentos funcionaron.</li>
+        </ul>
+      </section>
+
+      <section id="tab-consultar" class="tab" hidden>
+        <h1>Consultar la base documental</h1>
+        <div class="fila"><input id="pregunta" placeholder="¿Qué hemos observado antes sobre la experiencia del director de cuenta?"><button id="btn-preguntar" class="primario">Preguntar</button></div>
+        <article id="respuesta" class="markdown"></article>
+        <details id="refs-consulta" hidden><summary>Fragmentos usados</summary><div class="refs"></div></details>
+      </section>
+
+      <section id="tab-historial" class="tab" hidden>
+        <h1>Análisis anteriores</h1>
+        <div id="lista-historial"></div>
+      </section>
+    </main>
+  </div>
+  <div id="cargando" class="cargando">Cargando…</div>
+  <script type="module" src="assets/app.js"></script>
+</body>
+</html>
